@@ -107,7 +107,7 @@ export const MarkDown = ({
 						</code>
 					),
 					pre: ({ children }) => (
-						<pre className="bg-zinc-100 p-2 rounded text-xs overflow-x-auto">
+						<pre className="bg-zinc-100 p-2 rounded text-xs font-mono overflow-x-auto">
 							{children}
 						</pre>
 					),

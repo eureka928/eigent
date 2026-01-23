@@ -139,11 +139,9 @@ input {
   border-color: transparent;
 }
 
+pre,
 code {
-  background-color: #1a1a1a;
-  padding: 2px 4px;
-  margin: 0 4px;
-  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 }
 
 /* .card {

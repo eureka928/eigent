@@ -85,7 +85,7 @@ export const SummaryMarkDown = ({
 						</code>
 					),
 					pre: ({ children }) => (
-						<pre className="bg-emerald-50 border border-emerald-200 p-3 rounded-lg text-xs overflow-x-auto mb-3">
+						<pre className="bg-emerald-50 border border-emerald-200 p-3 rounded-lg text-xs font-mono overflow-x-auto mb-3">
 							{children}
 						</pre>
 					),

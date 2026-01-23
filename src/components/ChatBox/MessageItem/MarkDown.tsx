@@ -98,7 +98,7 @@ export const MarkDown = memo(
 							<li className="my-sm text-body-sm text-text-body">{children}</li>
 						),
 						code: ({ children }) => (
-							<code 
+							<code
 								className="bg-zinc-100 px-1 py-0.5 rounded text-body-sm text-text-body font-mono whitespace-pre-wrap break-all"
 								style={{ wordBreak: 'break-all' }}
 							>
@@ -106,8 +106,8 @@ export const MarkDown = memo(
 							</code>
 						),
 						pre: ({ children }) => (
-							<pre 
-								className="bg-zinc-100 p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all"
+							<pre
+								className="bg-zinc-100 p-2 rounded text-xs font-mono overflow-x-auto whitespace-pre-wrap break-all"
 								style={{ wordBreak: 'break-all' }}
 							>
 								{children}
