@@ -14,6 +14,7 @@
 
 import { useState, useEffect } from "react";
 import useChatStoreAdapter from "@/hooks/useChatStoreAdapter";
+import { ChatTaskStatus } from "@/types/constants";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
 	CodeXml,
@@ -241,9 +242,9 @@ export default function Project() {
 			action: type,
 		});
 		if (type === "pause") {
-			chatStore.setStatus(taskId, "pause");
+			chatStore.setStatus(taskId, ChatTaskStatus.PAUSE);
 		} else {
-			chatStore.setStatus(taskId, "running");
+			chatStore.setStatus(taskId, ChatTaskStatus.RUNNING);
 		}
 	};
 

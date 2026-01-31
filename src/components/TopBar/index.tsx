@@ -13,6 +13,7 @@
 // ========= Copyright 2025-2026 @ Eigent.ai All Rights Reserved. =========
 
 import { useState, useRef, useEffect, useMemo } from "react";
+import { ChatTaskStatus } from "@/types/constants";
 import {
 	Settings,
 	Minus,
@@ -134,7 +135,7 @@ function HeaderWin() {
 			const task = chatStore.tasks[taskId];
 
 			// Stop the task if it's running
-			if (task && task.status === 'running') {
+			if (task && task.status === ChatTaskStatus.RUNNING) {
 				await fetchPut(`/task/${taskId}/take-control`, {
 					action: 'stop',
 				});
@@ -148,7 +149,7 @@ function HeaderWin() {
 			}
 
 			// Delete from history using historyId
-			if (historyId && task.status !== "finished") {
+			if (historyId && task.status !== ChatTaskStatus.FINISHED) {
 				try {
 					await proxyFetchDelete(`/api/chat/history/${historyId}`);
 					// Remove from local store
@@ -294,7 +295,7 @@ function HeaderWin() {
 							(
 								(chatStore.tasks[chatStore.activeTaskId as string]?.messages?.length || 0) > 0 ||
 								chatStore.tasks[chatStore.activeTaskId as string]?.hasMessages ||
-								chatStore.tasks[chatStore.activeTaskId as string]?.status !== 'pending'
+								chatStore.tasks[chatStore.activeTaskId as string]?.status !== ChatTaskStatus.PENDING
 							) && (
 							<TooltipSimple content={t("layout.end-project")} side="bottom" align="end">
 								<Button
@@ -309,7 +310,7 @@ function HeaderWin() {
 							</TooltipSimple>
 						)}
 						{chatStore.activeTaskId &&
-							chatStore.tasks[chatStore.activeTaskId as string]?.status === 'finished' && (
+							chatStore.tasks[chatStore.activeTaskId as string]?.status === ChatTaskStatus.FINISHED && (
 							<TooltipSimple content={t("layout.share")} side="bottom" align="end">
 								<Button
 									onClick={() => handleShare(chatStore.activeTaskId as string)}

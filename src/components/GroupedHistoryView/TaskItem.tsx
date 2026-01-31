@@ -13,6 +13,7 @@
 // ========= Copyright 2025-2026 @ Eigent.ai All Rights Reserved. =========
 
 import React from "react";
+import { ChatTaskStatus } from "@/types/constants";
 import { Ellipsis, Share, Trash2, Clock, CheckCircle, XCircle, CirclePause, CirclePlay, Pin, Hash } from "lucide-react";
 import { HistoryTask } from "@/types/history";
 import { Button } from "@/components/ui/button";
@@ -55,7 +56,7 @@ export default function TaskItem({
   const { t } = useTranslation();
   
   // Check if task is paused (for ongoing tasks)
-  const isPaused = (task as any)._taskData?.status === "pause";
+  const isPaused = (task as any)._taskData?.status === ChatTaskStatus.PAUSE;
 
   const getStatusTag = (status: number) => {
     // ChatStatus enum: ongoing = 1, done = 2

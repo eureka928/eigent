@@ -13,6 +13,7 @@
 // ========= Copyright 2025-2026 @ Eigent.ai All Rights Reserved. =========
 
 import React, { useState, useMemo } from "react";
+import { ChatTaskStatus } from "@/types/constants";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronDown, ChevronRight, Folder, FolderClosed, FolderOpen, Calendar, Target, Clock, Activity, Zap, Bot, MoreVertical, Edit, Trash2, MoreHorizontal, Pin, Hash, Sparkles, Sparkle } from "lucide-react";
 import { ProjectGroup as ProjectGroupType, HistoryTask } from "@/types/history";
@@ -138,7 +139,7 @@ export default function ProjectGroup({
 
     // Check if any task in chatStore with matching task_id has pending status
     return Object.entries(chatStore.tasks).some(([taskId, task]) =>
-      projectTaskIds.includes(taskId) && task.status === 'pending'
+      projectTaskIds.includes(taskId) && task.status === ChatTaskStatus.PENDING
     );
   }, [chatStore?.tasks, project.tasks]);
   const hasIssue = hasHumanInLoop;
