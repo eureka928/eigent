@@ -13,6 +13,7 @@
 // ========= Copyright 2025-2026 @ Eigent.ai All Rights Reserved. =========
 
 import { fetchPost, fetchPut, getBaseURL, proxyFetchPost, proxyFetchPut, proxyFetchGet, uploadFile, fetchDelete, waitForBackendReady } from '@/api/http';
+import { AgentStep, AgentMessageStatus, AgentStatusValue, TaskStatus, ChatTaskStatus, type ChatTaskStatusType } from '@/types/constants';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
 import { createStore } from 'zustand';
 import { generateUniqueId, uploadLog } from "@/lib";
@@ -41,7 +42,7 @@ interface Task {
 	activeWorkSpace: string | null;
 	hasMessages: boolean;
 	activeAgent: string;
-	status: 'running' | 'finished' | 'pending' | 'pause';
+	status: ChatTaskStatusType;
 	taskTime: number;
 	elapsed: number;
 	tokens: number;
@@ -68,7 +69,7 @@ export interface ChatStore {
 	create: (id?: string, type?: any) => string;
 	removeTask: (taskId: string) => void;
 	stopTask: (taskId: string) => void;
-	setStatus: (taskId: string, status: 'running' | 'finished' | 'pending' | 'pause') => void;
+	setStatus: (taskId: string, status: ChatTaskStatusType) => void;
 	setActiveTaskId: (taskId: string) => void;
 	replay: (taskId: string, question: string, time: number) => Promise<void>;
 	startTask: (taskId: string, type?: string, shareToken?: string, delayTime?: number, messageContent?: string, messageAttaches?: File[]) => Promise<void>;
@@ -206,7 +207,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						activeWorkSpace: 'workflow',
 						hasMessages: false,
 						activeAgent: '',
-						status: 'pending',
+						status: ChatTaskStatus.PENDING,
 						taskTime: 0,
 						tokens: 0,
 						elapsed: 0,
@@ -230,7 +231,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 			const { tasks, setProgressValue, activeTaskId } = get()
 			const taskRunning = [...tasks[taskId].taskRunning]
 			const finishedTask = taskRunning?.filter(
-				(task) => task.status === "completed" || task.status === "failed"
+				(task) => task.status === TaskStatus.COMPLETED || task.status === TaskStatus.FAILED
 			).length;
 			const taskProgress = (
 				((finishedTask || 0) / (taskRunning?.length || 0)) *
@@ -335,7 +336,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 							...state.tasks,
 							[taskId]: {
 								...state.tasks[taskId],
-								status: 'finished'
+								status: ChatTaskStatus.FINISHED
 							},
 						},
 					};
@@ -656,18 +657,18 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 					// Valid events after task completion:
 					// - Task switching: confirmed, new_task_state, end
 					// - Multi-turn simple answer: wait_confirm
-					const isTaskSwitchingEvent = agentMessages.step === "confirmed" ||
-						agentMessages.step === "new_task_state" ||
-						agentMessages.step === "end";
+					const isTaskSwitchingEvent = agentMessages.step === AgentStep.CONFIRMED ||
+						agentMessages.step === AgentStep.NEW_TASK_STATE ||
+						agentMessages.step === AgentStep.END;
 
-					const isMultiTurnSimpleAnswer = agentMessages.step === "wait_confirm";
+					const isMultiTurnSimpleAnswer = agentMessages.step === AgentStep.WAIT_CONFIRM;
 
 					if (!currentTask) {
 						console.log(`Task ${lockedTaskId} not found, ignoring SSE message for step: ${agentMessages.step}`);
 						return;
 					}
 
-					if (currentTask.status === 'finished' && !isTaskSwitchingEvent && !isMultiTurnSimpleAnswer) {
+					if (currentTask.status === ChatTaskStatus.FINISHED && !isTaskSwitchingEvent && !isMultiTurnSimpleAnswer) {
 						// Ignore messages for finished tasks except:
 						// 1. Task switching events (create new chatStore)
 						// 2. Simple answer events (direct response without new chatStore)
@@ -692,7 +693,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 					 */
 					let currentTaskId = getCurrentTaskId();
 					const previousChatStore = getCurrentChatStore()
-					if (agentMessages.step === "confirmed") {
+					if (agentMessages.step === AgentStep.CONFIRMED) {
 						const { question } = agentMessages.data;
 						const shouldCreateNewChat = project_id && (question || messageContent);
 
@@ -767,7 +768,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						} else {
 							//NOTE: Triggered only with first "confirmed" in the project
 							//Handle Original cases - with old chatStore
-							previousChatStore.setStatus(currentTaskId, 'pending');
+							previousChatStore.setStatus(currentTaskId, ChatTaskStatus.PENDING);
 							previousChatStore.setHasWaitComfirm(currentTaskId, false);
 						}
 
@@ -811,8 +812,8 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						setIsTaskEdit } = getCurrentChatStore()
 
 					currentTaskId = getCurrentTaskId();
-					// if (tasks[currentTaskId].status === 'finished') return
-					if (agentMessages.step === "decompose_text") {
+					// if (tasks[currentTaskId].status === ChatTaskStatus.FINISHED) return
+					if (agentMessages.step === AgentStep.DECOMPOSE_TEXT) {
 						const { content } = agentMessages.data;
 						const text = content;
 						const currentId = getCurrentTaskId();
@@ -854,31 +855,31 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						return;
 					}
 
-					if (agentMessages.step === "to_sub_tasks") {
+					if (agentMessages.step === AgentStep.TO_SUB_TASKS) {
 						// Clear streaming decompose text when task splitting is done
 						clearStreamingDecomposeText(currentTaskId);
 						// Clean up TTFT tracking
 						delete ttftTracking[currentTaskId];
 
 						// Check if task is already confirmed - don't overwrite user edits
-						const existingToSubTasksMessage = tasks[currentTaskId].messages.findLast((m: Message) => m.step === 'to_sub_tasks');
+						const existingToSubTasksMessage = tasks[currentTaskId].messages.findLast((m: Message) => m.step === AgentStep.TO_SUB_TASKS);
 						if (existingToSubTasksMessage?.isConfirm) {
 							return;
 						}
 
 						// Check if this is a multi-turn scenario after task completion
-						const isMultiTurnAfterCompletion = tasks[currentTaskId].status === 'finished';
+						const isMultiTurnAfterCompletion = tasks[currentTaskId].status === ChatTaskStatus.FINISHED;
 
 						// Reset status for multi-turn complex tasks to allow splitting panel to show
 						if (isMultiTurnAfterCompletion) {
-							setStatus(currentTaskId, 'pending');
+							setStatus(currentTaskId, ChatTaskStatus.PENDING);
 						}
 
 						// Each splitting round starts in a clean editing state
 						setIsTaskEdit(currentTaskId, false);
 
 						const messages = [...tasks[currentTaskId].messages]
-						const toSubTaskIndex = messages.findLastIndex((message: Message) => message.step === 'to_sub_tasks')
+						const toSubTaskIndex = messages.findLastIndex((message: Message) => message.step === AgentStep.TO_SUB_TASKS)
 						// For multi-turn scenarios, always create a new to_sub_tasks message
 						// even if one already exists from a previous task
 						if (toSubTaskIndex === -1 || isMultiTurnAfterCompletion) {
@@ -899,7 +900,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 										const currentStore = getCurrentChatStore();
 										const currentId = getCurrentTaskId();
 										const { tasks, handleConfirmTask, setIsTaskEdit } = currentStore;
-										const message = tasks[currentId].messages.findLast((item) => item.step === "to_sub_tasks");
+										const message = tasks[currentId].messages.findLast((item) => item.step === AgentStep.TO_SUB_TASKS);
 										const isConfirm = message?.isConfirm || false;
 										const isTakeControl =
 											tasks[currentId].isTakeControl;
@@ -923,7 +924,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 								id: generateUniqueId(),
 								role: "agent",
 								content: "",
-								step: 'notice_card',
+								step: AgentStep.NOTICE_CARD,
 							};
 							addMessages(currentTaskId, newNoticeMessage)
 							const shouldAutoConfirm = !!type && !isMultiTurnAfterCompletion;
@@ -947,7 +948,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 							type !== 'replay' && agentMessages.data.sub_tasks?.push(newTaskInfo)
 						}
 						agentMessages.data.sub_tasks = agentMessages.data.sub_tasks?.map(item => {
-							item.status = ''
+							item.status = TaskStatus.EMPTY
 							return item
 						})
 
@@ -966,7 +967,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						return;
 					}
 					// Create agent
-					if (agentMessages.step === "create_agent") {
+					if (agentMessages.step === AgentStep.CREATE_AGENT) {
 						const { agent_name, agent_id } = agentMessages.data;
 						if (!agent_name || !agent_id) return;
 
@@ -1002,7 +1003,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						}
 						return;
 					}
-					if (agentMessages.step === "wait_confirm") {
+					if (agentMessages.step === AgentStep.WAIT_CONFIRM) {
 						const { content, question } = agentMessages.data;
 						setHasWaitComfirm(currentTaskId, true)
 						setIsPending(currentTaskId, false)
@@ -1019,7 +1020,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 								id: generateUniqueId(),
 								role: "user",
 								content: question as string,
-								step: "wait_confirm",
+								step: AgentStep.WAIT_CONFIRM,
 								isConfirm: false,
 							})
 						}
@@ -1027,13 +1028,13 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 							id: generateUniqueId(),
 							role: "agent",
 							content: content as string,
-							step: "wait_confirm",
+							step: AgentStep.WAIT_CONFIRM,
 							isConfirm: false,
 						})
 						return;
 					}
 					// Task State
-					if (agentMessages.step === "task_state") {
+					if (agentMessages.step === AgentStep.TASK_STATE) {
 						const { state, task_id, result, failure_count } = agentMessages.data;
 						if (!state && !task_id) return
 
@@ -1043,7 +1044,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						const targetTaskAssigningIndex = taskAssigning.findIndex((agent) => agent.tasks.find((task: TaskInfo) => task.id === task_id && !task.reAssignTo))
 						if (targetTaskAssigningIndex !== -1) {
 							const taskIndex = taskAssigning[targetTaskAssigningIndex].tasks.findIndex((task: TaskInfo) => task.id === task_id)
-							taskAssigning[targetTaskAssigningIndex].tasks[taskIndex].status = state === "DONE" ? "completed" : "failed";
+							taskAssigning[targetTaskAssigningIndex].tasks[taskIndex].status = state === "DONE" ? TaskStatus.COMPLETED : TaskStatus.FAILED;
 							taskAssigning[targetTaskAssigningIndex].tasks[taskIndex].failure_count = failure_count || 0
 
 							// destroy webview
@@ -1072,7 +1073,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 										id: generateUniqueId(),
 										role: "agent",
 										content: targetResult,
-										step: "failed",
+										step: AgentStep.FAILED,
 									})
 								}
 							}
@@ -1080,7 +1081,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						}
 						if (targetTaskIndex !== -1) {
 							console.log("targetTaskIndex", targetTaskIndex, state)
-							taskRunning[targetTaskIndex].status = state === "DONE" ? "completed" : "failed";
+							taskRunning[targetTaskIndex].status = state === "DONE" ? TaskStatus.COMPLETED : TaskStatus.FAILED;
 						}
 						setTaskRunning(currentTaskId, taskRunning)
 						setTaskAssigning(currentTaskId, taskAssigning)
@@ -1090,7 +1091,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 					 * @deprecated
 					 * Side effect handled on top of the message handler
 					 */
-					if (agentMessages.step === "new_task_state") {
+					if (agentMessages.step === AgentStep.NEW_TASK_STATE) {
 						const { task_id, content, state, result, failure_count } = agentMessages.data;
 						//new chatStore logic is handled along side "confirmed" event
 						console.log(`Received new task: ${task_id} with content: ${content}`);
@@ -1098,7 +1099,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 					}
 
 					// Activate agent
-					if (agentMessages.step === "activate_agent" || agentMessages.step === "deactivate_agent") {
+					if (agentMessages.step === AgentStep.ACTIVATE_AGENT || agentMessages.step === AgentStep.DEACTIVATE_AGENT) {
 						let taskAssigning = [...tasks[currentTaskId].taskAssigning]
 						let taskRunning = [...tasks[currentTaskId].taskRunning]
 						if (agentMessages.data.tokens) {
@@ -1117,32 +1118,32 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						// }
 
 						const message = filterMessage(agentMessages)
-						if (agentMessages.step === "activate_agent") {
-							taskAssigning[agentIndex].status = "running";
+						if (agentMessages.step === AgentStep.ACTIVATE_AGENT) {
+							taskAssigning[agentIndex].status = TaskStatus.RUNNING;
 							if (message) {
 								taskAssigning[agentIndex].log.push({
 									...agentMessages,
-									status: "running",
+									status: AgentMessageStatus.RUNNING,
 								});
 							}
 							const taskIndex = taskRunning.findIndex((task) => task.id === process_task_id);
 							if (taskIndex !== -1 && taskRunning![taskIndex].status) {
-								taskRunning![taskIndex].agent!.status = "running";
-								taskRunning![taskIndex]!.status = "running";
+								taskRunning![taskIndex].agent!.status = TaskStatus.RUNNING;
+								taskRunning![taskIndex]!.status = TaskStatus.RUNNING;
 
 								const task = taskAssigning[agentIndex].tasks.find((task: TaskInfo) => task.id === process_task_id);
 								if (task) {
-									task.status = "running";
+									task.status = TaskStatus.RUNNING;
 								}
 							}
 							setTaskRunning(currentTaskId, [...taskRunning]);
 							setTaskAssigning(currentTaskId, [...taskAssigning]);
 						}
-						if (agentMessages.step === "deactivate_agent") {
+						if (agentMessages.step === AgentStep.DEACTIVATE_AGENT) {
 							if (message) {
 								const index = taskAssigning[agentIndex].log.findLastIndex((log) => log.data.method_name === agentMessages.data.method_name && log.data.toolkit_name === agentMessages.data.toolkit_name)
 								if (index != -1) {
-									taskAssigning[agentIndex].log[index].status = "completed";
+									taskAssigning[agentIndex].log[index].status = AgentMessageStatus.COMPLETED;
 									setTaskAssigning(currentTaskId, [...taskAssigning]);
 								}
 
@@ -1174,7 +1175,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						return;
 					}
 					// Assign task
-					if (agentMessages.step === "assign_task") {
+					if (agentMessages.step === AgentStep.ASSIGN_TASK) {
 						if (!agentMessages.data?.assignee_id || !agentMessages.data?.task_id) return;
 
 						const { assignee_id, task_id, content = "", state: taskState, failure_count } = agentMessages.data as any;
@@ -1233,7 +1234,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						// Handle task assignment to taskAssigning based on state
 						if (taskState === "waiting") {
 							if (!taskAssigning[assigneeAgentIndex].tasks.find(item => item.id === task_id)) {
-								taskAssigning[assigneeAgentIndex].tasks.push(task ?? { id: task_id, content, status: "waiting" });
+								taskAssigning[assigneeAgentIndex].tasks.push(task ?? { id: task_id, content, status: TaskStatus.WAITING });
 							}
 							setTaskAssigning(currentTaskId, [...taskAssigning]);
 
@@ -1245,7 +1246,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 
 							if (existingTaskIndex !== -1) {
 								// Task already exists, update its status
-								taskAssigning[assigneeAgentIndex].tasks[existingTaskIndex].status = "running";
+								taskAssigning[assigneeAgentIndex].tasks[existingTaskIndex].status = TaskStatus.RUNNING;
 								if (failure_count !== 0) {
 									taskAssigning[assigneeAgentIndex].tasks[existingTaskIndex].failure_count = failure_count;
 								}
@@ -1255,11 +1256,11 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 								if (task) {
 									taskTemp = JSON.parse(JSON.stringify(task))
 									taskTemp.failure_count = 0
-									taskTemp.status = "running"
+									taskTemp.status = TaskStatus.RUNNING
 									taskTemp.toolkits = []
 									taskTemp.report = ""
 								}
-								taskAssigning[assigneeAgentIndex].tasks.push(taskTemp ?? { id: task_id, content, status: "running", });
+								taskAssigning[assigneeAgentIndex].tasks.push(taskTemp ?? { id: task_id, content, status: TaskStatus.RUNNING, });
 							}
 						}
 
@@ -1267,13 +1268,13 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						if (taskRunningIndex === -1) {
 							// Task not in taskRunning, add it
 							if (task) {
-								task.status = taskState === "waiting" ? "waiting" : "running";
+								task.status = taskState === "waiting" ? TaskStatus.WAITING : TaskStatus.RUNNING;
 							}
 							taskRunning!.push(
 								task ?? {
 									id: task_id,
 									content,
-									status: taskState === "waiting" ? "waiting" : "running",
+									status: taskState === "waiting" ? TaskStatus.WAITING : TaskStatus.RUNNING,
 									agent: JSON.parse(JSON.stringify(taskAgent)),
 								}
 							);
@@ -1281,7 +1282,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 							// Task already in taskRunning, update it
 							taskRunning![taskRunningIndex] = {
 								...taskRunning![taskRunningIndex],
-								status: taskState === "waiting" ? "waiting" : "running",
+								status: taskState === "waiting" ? TaskStatus.WAITING : TaskStatus.RUNNING,
 								agent: JSON.parse(JSON.stringify(taskAgent)),
 							};
 						}
@@ -1291,7 +1292,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						return;
 					}
 					// Activate Toolkit
-					if (agentMessages.step === "activate_toolkit") {
+					if (agentMessages.step === AgentStep.ACTIVATE_TOOLKIT) {
 						// add log
 						let taskAssigning = [...tasks[currentTaskId].taskAssigning]
 						const resolvedProcessTaskId = resolveProcessTaskIdForToolkitEvent(
@@ -1350,7 +1351,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 										toolkitName: toolkit_name,
 										toolkitMethods: method_name,
 										message: normalizeToolkitMessage(message.data.message),
-										toolkitStatus: "running" as AgentStatus,
+										toolkitStatus: AgentStatusValue.RUNNING,
 									}
 
 									// Update taskAssigning if we found the agent
@@ -1359,13 +1360,13 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 										if (task) {
 											task.toolkits ??= []
 											task.toolkits.push({ ...toolkit });
-											task.status = "running";
+											task.status = TaskStatus.RUNNING;
 											setTaskAssigning(currentTaskId, [...taskAssigning]);
 										}
 									}
 
 									// Always update taskRunning (even if assigneeAgentIndex is -1)
-									taskRunning![taskIndex].status = "running";
+									taskRunning![taskIndex].status = TaskStatus.RUNNING;
 									taskRunning![taskIndex].toolkits ??= [];
 									taskRunning![taskIndex].toolkits.push({ ...toolkit });
 								}
@@ -1375,7 +1376,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						return;
 					}
 					// Deactivate Toolkit
-					if (agentMessages.step === "deactivate_toolkit") {
+					if (agentMessages.step === AgentStep.DEACTIVATE_TOOLKIT) {
 
 						// add log
 						let taskAssigning = [...tasks[currentTaskId].taskAssigning]
@@ -1393,24 +1394,24 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 								const task = taskAssigning[assigneeAgentIndex].tasks.find((task: TaskInfo) => task.id === resolvedProcessTaskId);
 								if (task) {
 									let index = task.toolkits?.findIndex((toolkit: any) => {
-										return toolkit.toolkitName === agentMessages.data.toolkit_name && toolkit.toolkitMethods === agentMessages.data.method_name && toolkit.toolkitStatus === 'running'
+										return toolkit.toolkitName === agentMessages.data.toolkit_name && toolkit.toolkitMethods === agentMessages.data.method_name && toolkit.toolkitStatus === TaskStatus.RUNNING
 									})
 
 									if (task.toolkits && index !== -1 && index !== undefined) {
 										task.toolkits[index].message = `${normalizeToolkitMessage(task.toolkits[index].message)}\n${normalizeToolkitMessage(message.data.message)}`.trim()
-										task.toolkits[index].toolkitStatus = "completed"
+										task.toolkits[index].toolkitStatus = AgentStatusValue.COMPLETED
 									}
 									// task.toolkits?.unshift({
 									// 	toolkitName: agentMessages.data.toolkit_name as string,
 									// 	toolkitMethods: agentMessages.data.method_name as string,
 									// 	message: message.data.message as string,
-									// 	toolkitStatus: "completed",
+									// 	toolkitStatus: AgentStatusValue.COMPLETED,
 									// });
 									// task.toolkits?.unshift({
 									// 	toolkitName: agentMessages.data.toolkit_name as string,
 									// 	toolkitMethods: agentMessages.data.method_name as string,
 									// 	message: message.data.message as string,
-									// 	toolkitStatus: "completed",
+									// 	toolkitStatus: AgentStatusValue.COMPLETED,
 									// });
 
 								}
@@ -1437,7 +1438,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 										toolkitName: toolkit_name,
 										toolkitMethods: method_name,
 										message: normalizeToolkitMessage(targetMessage.data.message),
-										toolkitStatus: "completed",
+										toolkitStatus: AgentStatusValue.COMPLETED,
 									});
 								}
 
@@ -1448,12 +1449,12 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						return;
 					}
 					// Terminal
-					if (agentMessages.step === "terminal") {
+					if (agentMessages.step === AgentStep.TERMINAL) {
 						addTerminal(currentTaskId, agentMessages.data.process_task_id as string, agentMessages.data.output as string)
 						return
 					}
 					// Write File
-					if (agentMessages.step === "write_file") {
+					if (agentMessages.step === AgentStep.WRITE_FILE) {
 						console.log('write_to_file', agentMessages.data)
 						setNuwFileNum(currentTaskId, tasks[currentTaskId].nuwFileNum + 1)
 						const { file_path } = agentMessages.data;
@@ -1469,16 +1470,16 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						return;
 					}
 
-					if (agentMessages.step === "budget_not_enough") {
+					if (agentMessages.step === AgentStep.BUDGET_NOT_ENOUGH) {
 						console.log('error', agentMessages.data)
 						showCreditsToast()
-						setStatus(currentTaskId, 'pause');
+						setStatus(currentTaskId, ChatTaskStatus.PAUSE);
 						uploadLog(currentTaskId, type)
 						return
 					}
 
 
-					if (agentMessages.step === "context_too_long") {
+					if (agentMessages.step === AgentStep.CONTEXT_TOO_LONG) {
 						console.error('Context too long:', agentMessages.data)
 						const currentLength = agentMessages.data.current_length || 0;
 						const maxLength = agentMessages.data.max_length || 100000;
@@ -1495,12 +1496,12 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 
 						// Set flag to block input and set status to pause
 						setIsContextExceeded(currentTaskId, true);
-						setStatus(currentTaskId, "pause");
+						setStatus(currentTaskId, ChatTaskStatus.PAUSE);
 						uploadLog(currentTaskId, type);
 						return
 					}
 
-					if (agentMessages.step === "error") {
+					if (agentMessages.step === AgentStep.ERROR) {
 						try {
 							console.error('Model error:', agentMessages.data);
 
@@ -1520,8 +1521,8 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 
 							// Update taskRunning - mark non-completed tasks as failed
 							taskRunning = taskRunning.map((task) => {
-								if (task.status !== "completed" && task.status !== "failed") {
-									task.status = "failed";
+								if (task.status !== TaskStatus.COMPLETED && task.status !== TaskStatus.FAILED) {
+									task.status = TaskStatus.FAILED;
 								}
 								return task;
 							});
@@ -1529,8 +1530,8 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 							// Update taskAssigning - mark non-completed tasks as failed
 							taskAssigning = taskAssigning.map((agent) => {
 								agent.tasks = agent.tasks.map((task) => {
-									if (task.status !== "completed" && task.status !== "failed") {
-										task.status = "failed";
+									if (task.status !== TaskStatus.COMPLETED && task.status !== TaskStatus.FAILED) {
+										task.status = TaskStatus.FAILED;
 									}
 									return task;
 								});
@@ -1542,7 +1543,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 							setTaskAssigning(currentTaskId, taskAssigning);
 
 							// Complete the current task with error status
-							setStatus(currentTaskId, 'finished');
+							setStatus(currentTaskId, ChatTaskStatus.FINISHED);
 							setIsPending(currentTaskId, false);
 
 							// Add error message to the current task
@@ -1584,7 +1585,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 					}
 
 					// Handle add_task events for project store
-					if (agentMessages.step === "add_task") {
+					if (agentMessages.step === AgentStep.ADD_TASK) {
 						try {
 							const taskData = agentMessages.data;
 							if (taskData && taskData.project_id && taskData.content) {
@@ -1612,7 +1613,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 					}
 
 					// Handle remove_task events for project store
-					if (agentMessages.step === "remove_task") {
+					if (agentMessages.step === AgentStep.REMOVE_TASK) {
 						try {
 							const taskIdToRemove = agentMessages.data.task_id as string;
 							if (taskIdToRemove) {
@@ -1639,7 +1640,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						return;
 					}
 
-					if (agentMessages.step === "end") {
+					if (agentMessages.step === AgentStep.END) {
 						// compute task time
 						console.log('tasks[taskId].snapshotsTemp', tasks[currentTaskId].snapshotsTemp)
 						Promise.all(tasks[currentTaskId].snapshotsTemp.map((snapshot) =>
@@ -1725,8 +1726,8 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						let taskAssigning = [...tasks[currentTaskId].taskAssigning];
 						taskAssigning = taskAssigning.map((agent) => {
 							agent.tasks = agent.tasks.map((task) => {
-								if (task.status !== "completed" && task.status !== "failed" && !type) {
-									task.status = "skipped"
+								if (task.status !== TaskStatus.COMPLETED && task.status !== TaskStatus.FAILED && !type) {
+									task.status = TaskStatus.SKIPPED
 								}
 								return task
 							})
@@ -1735,8 +1736,8 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 
 						taskRunning = taskRunning.map((task) => {
 							console.log('task.status', task.status)
-							if (task.status !== "completed" && task.status !== "failed" && !type) {
-								task.status = "skipped"
+							if (task.status !== TaskStatus.COMPLETED && task.status !== TaskStatus.FAILED && !type) {
+								task.status = TaskStatus.SKIPPED
 							}
 							return task
 						})
@@ -1764,7 +1765,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						let endMessage = agentMessages.data as string
 						let summary = endMessage.match(/<summary>(.*?)<\/summary>/)?.[1]
 						let newMessage: Message | null = null
-						const agent_summary_end = tasks[currentTaskId].messages.findLast((message: Message) => message.step === 'agent_summary_end')
+						const agent_summary_end = tasks[currentTaskId].messages.findLast((message: Message) => message.step === AgentStep.AGENT_SUMMARY_END)
 						console.log('summary', summary)
 						if (summary) {
 							endMessage = summary
@@ -1788,7 +1789,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						addMessages(currentTaskId, newMessage);
 
 						setIsPending(currentTaskId, false);
-						setStatus(currentTaskId, 'finished');
+						setStatus(currentTaskId, ChatTaskStatus.FINISHED);
 						// completed tasks move to history
 						setUpdateCount();
 
@@ -1797,7 +1798,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 
 						return;
 					}
-					if (agentMessages.step === "notice") {
+					if (agentMessages.step === AgentStep.NOTICE) {
 						if (agentMessages.data.process_task_id !== '') {
 							let taskAssigning = [...tasks[currentTaskId].taskAssigning]
 
@@ -1808,7 +1809,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 								toolkitName: 'notice',
 								toolkitMethods: '',
 								message: agentMessages.data.notice as string,
-								toolkitStatus: "running" as AgentStatus,
+								toolkitStatus: AgentStatusValue.RUNNING,
 							}
 							if (assigneeAgentIndex !== -1 && task) {
 								task.toolkits ??= []
@@ -1817,13 +1818,13 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 							setTaskAssigning(currentTaskId, [...taskAssigning]);
 						} else {
 							const messages = [...tasks[currentTaskId].messages]
-							const noticeCardIndex = messages.findLastIndex((message) => message.step === 'notice_card')
+							const noticeCardIndex = messages.findLastIndex((message) => message.step === AgentStep.NOTICE_CARD)
 							if (noticeCardIndex === -1) {
 								const newMessage: Message = {
 									id: generateUniqueId(),
 									role: "agent",
 									content: "",
-									step: 'notice_card',
+									step: AgentStep.NOTICE_CARD,
 								};
 								addMessages(currentTaskId, newMessage)
 							}
@@ -1832,8 +1833,8 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						return
 
 					}
-					if (["sync"].includes(agentMessages.step)) return
-					if (agentMessages.step === "ask") {
+					if (agentMessages.step === AgentStep.SYNC) return
+					if (agentMessages.step === AgentStep.ASK) {
 						if (tasks[currentTaskId].activeAsk != '') {
 							const newMessage: Message = {
 								id: generateUniqueId(),
@@ -2139,7 +2140,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 				},
 			}))
 		},
-		setStatus(taskId: string, status: 'running' | 'finished' | 'pending' | 'pause') {
+		setStatus(taskId: string, status: ChatTaskStatusType) {
 			set((state) => ({
 				...state,
 				tasks: {
@@ -2176,7 +2177,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 			// IMPORTANT: Set isConfirm BEFORE sending API requests to prevent race condition
 			// where backend sends to_sub_tasks SSE event before we mark task as confirmed
 			let messages = [...tasks[taskId].messages]
-			const cardTaskIndex = messages.findLastIndex((message) => message.step === 'to_sub_tasks')
+			const cardTaskIndex = messages.findLastIndex((message) => message.step === AgentStep.TO_SUB_TASKS)
 			if (cardTaskIndex !== -1) {
 				messages[cardTaskIndex] = {
 					...messages[cardTaskIndex],
@@ -2193,7 +2194,7 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 				await fetchPost(`/task/${project_id}/start`, {});
 
 				setActiveWorkSpace(taskId, 'workflow')
-				setStatus(taskId, 'running')
+				setStatus(taskId, ChatTaskStatus.RUNNING)
 			}
 
 			// Reset editing state after manual confirmation so next round can auto-start
