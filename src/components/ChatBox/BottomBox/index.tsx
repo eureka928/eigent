@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2025-2026 @ Eigent.ai All Rights Reserved. =========
 
+import { type ChatTaskStatusType } from "@/types/constants";
 import { Inputbox, InputboxProps, FileAttachment } from "./InputBox";
 import { BoxHeaderSplitting, BoxHeaderConfirm } from "./BoxHeader";
 import { QueuedBox, QueuedMessage } from "./QueuedBox";
@@ -41,7 +42,7 @@ interface BottomBoxProps {
 	// Task info
 	tokens?: number;
 	taskTime?: string;
-	taskStatus?: 'running' | 'finished' | 'pending' | 'pause';
+	taskStatus?: ChatTaskStatusType;
 	
 	// Replay
 	onReplay?: () => void;

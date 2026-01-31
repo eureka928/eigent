@@ -13,6 +13,7 @@
 // ========= Copyright 2025-2026 @ Eigent.ai All Rights Reserved. =========
 
 import React from 'react';
+import { AgentStep } from '@/types/constants';
 import { motion } from 'framer-motion';
 import { UserQueryGroup } from './UserQueryGroup';
 import { FloatingAction } from './FloatingAction';
@@ -157,7 +158,7 @@ function groupMessagesByQuery(messages: any[]) {
         userMessage: message,
         otherMessages: []
       };
-    } else if (message.step === 'to_sub_tasks') {
+    } else if (message.step === AgentStep.TO_SUB_TASKS) {
       // Task planning message - each should get its own panel
 
       // Skip if we've already processed this to_sub_tasks
