@@ -13,6 +13,7 @@
 // ========= Copyright 2025-2026 @ Eigent.ai All Rights Reserved. =========
 
 import { useSidebarStore } from "@/store/sidebarStore";
+import { ChatTaskStatus } from "@/types/constants";
 import { motion, AnimatePresence } from "framer-motion";
 import {
 	ArrowLeft,
@@ -118,7 +119,7 @@ export default function HistorySidebar() {
 				Object.keys(csState.tasks || {}).forEach((taskId) => {
 					const task = csState.tasks[taskId];
 					// Only include ongoing tasks
-					if (task.status !== "finished" && !task.type) {
+					if (task.status !== ChatTaskStatus.FINISHED && !task.type) {
 						hasOngoingTasks = true;
 						taskCount++;
 						if (task.tokens) {
