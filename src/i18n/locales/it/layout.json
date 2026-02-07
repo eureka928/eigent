@@ -169,5 +169,7 @@
   "delete-project": "Elimina Progetto",
   "delete-project-confirmation": "Sei sicuro di voler eliminare questo progetto e tutte le sue attività? Questa azione non può essere annullata.",
   "please-select-model": "Seleziona un modello in Impostazioni > Modelli per continuare.",
-  "capabilities": "Capacità"
+  "capabilities": "Capacità",
+  "agree-to-terms": "I agree to the",
+  "please-accept-terms": "Please accept the Terms of Use and Privacy Policy to continue"
 }
