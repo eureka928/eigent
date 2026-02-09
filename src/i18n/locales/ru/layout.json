@@ -166,5 +166,10 @@
   "days-ago": "дней назад",
   "delete-project": "Удалить проект",
   "delete-project-confirmation": "Вы уверены, что хотите удалить этот проект и все его задачи? Это действие нельзя отменить.",
-  "please-select-model": "Пожалуйста, выберите модель в Настройки > Модели, чтобы продолжить."
+  "please-select-model": "Пожалуйста, выберите модель в Настройки > Модели, чтобы продолжить.",
+  "decomposition-thinking": "Eigent is thinking about your request...",
+  "decomposition-preparing": "Preparing your workforce team...",
+  "decomposition-understanding": "Understanding the goal...",
+  "decomposition-planning": "Eigent is planning the task...",
+  "decomposition-decomposing": "Breaking down into executable sub-tasks..."
 }

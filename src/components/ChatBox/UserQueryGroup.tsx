@@ -25,6 +25,7 @@ import React, {
 import { AgentMessageCard } from './MessageItem/AgentMessageCard';
 import { NoticeCard } from './MessageItem/NoticeCard';
 import { UserMessageCard } from './MessageItem/UserMessageCard';
+import { DecompositionStatus } from './TaskBox/DecompositionStatus';
 import { StreamingTaskList } from './TaskBox/StreamingTaskList';
 import { TaskCard } from './TaskBox/TaskCard';
 import { TypeCardSkeleton } from './TaskBox/TypeCardSkeleton';
@@ -67,6 +68,17 @@ export const UserQueryGroup: React.FC<UserQueryGroupProps> = ({
       const taskId = state.activeTaskId;
       if (!taskId || !state.tasks[taskId]) return '';
       return state.tasks[taskId].streamingDecomposeText || '';
+    }
+  );
+
+  // Subscribe to decomposition phase for staged status prompts
+  const decompositionPhase = useSyncExternalStore(
+    (callback) => chatStore.subscribe(callback),
+    () => {
+      const state = chatStore.getState();
+      const taskId = state.activeTaskId;
+      if (!taskId || !state.tasks[taskId]) return null;
+      return state.tasks[taskId].decompositionPhase;
     }
   );
 
@@ -224,6 +236,11 @@ export const UserQueryGroup: React.FC<UserQueryGroupProps> = ({
             attaches={queryGroup.userMessage.attaches}
           />
         </motion.div>
+      )}
+
+      {/* Decomposition status prompt */}
+      {isLastUserQuery && decompositionPhase && (
+        <DecompositionStatus phase={decompositionPhase} />
       )}
 
       {/* Sticky Task Box - Show only when task exists and NOT in skeleton phase */}

@@ -75,6 +75,13 @@ interface Task {
   isContextExceeded?: boolean;
   // Streaming decompose text - stored separately to avoid frequent re-renders
   streamingDecomposeText: string;
+  decompositionPhase:
+    | 'thinking'
+    | 'preparing'
+    | 'understanding'
+    | 'planning'
+    | 'decomposing'
+    | null;
 }
 
 export interface ChatStore {
@@ -169,6 +176,10 @@ export interface ChatStore {
   setNextTaskId: (taskId: string | null) => void;
   setStreamingDecomposeText: (taskId: string, text: string) => void;
   clearStreamingDecomposeText: (taskId: string) => void;
+  setDecompositionPhase: (
+    taskId: string,
+    phase: Task['decompositionPhase']
+  ) => void;
 }
 
 export type VanillaChatStore = {
@@ -226,6 +237,18 @@ const resolveProcessTaskIdForToolkitEvent = (
   if (typeof last?.id === 'string' && last.id) return last.id;
   return '';
 };
+// Track decomposition phase timers per task for staged status prompts
+const decompositionPhaseTimers: Record<
+  string,
+  ReturnType<typeof setTimeout>[]
+> = {};
+const clearDecompositionPhaseTimers = (taskId: string) => {
+  if (decompositionPhaseTimers[taskId]) {
+    decompositionPhaseTimers[taskId].forEach(clearTimeout);
+    delete decompositionPhaseTimers[taskId];
+  }
+};
+
 // Throttle streaming decompose text updates to prevent excessive re-renders
 const streamingDecomposeTextBuffer: Record<string, string> = {};
 const streamingDecomposeTextTimers: Record<
@@ -283,6 +306,7 @@ const chatStore = (initial?: Partial<ChatStore>) =>
             isTakeControl: false,
             isTaskEdit: false,
             streamingDecomposeText: '',
+            decompositionPhase: null,
           },
         },
       }));
@@ -312,6 +336,9 @@ const chatStore = (initial?: Partial<ChatStore>) =>
       } catch (error) {
         console.warn('Error clearing auto-confirm timer in removeTask:', error);
       }
+
+      // Clean up decomposition phase timers
+      clearDecompositionPhaseTimers(taskId);
 
       // Clean up SSE connection if it exists
       try {
@@ -383,6 +410,9 @@ const chatStore = (initial?: Partial<ChatStore>) =>
       } catch (error) {
         console.warn('Error clearing auto-confirm timer in stopTask:', error);
       }
+
+      // Clean up decomposition phase timers
+      clearDecompositionPhaseTimers(taskId);
 
       // Update task status to finished - ensure this happens even if cleanup fails
       try {
@@ -473,6 +503,9 @@ const chatStore = (initial?: Partial<ChatStore>) =>
           newTaskId = newChatResult.taskId;
           targetChatStore = newChatResult.chatStore;
           targetChatStore.getState().setIsPending(newTaskId, true);
+          targetChatStore
+            .getState()
+            .setDecompositionPhase(newTaskId, 'thinking');
 
           //From handleSend if message is given
           // Add the message to the new chatStore if provided
@@ -934,6 +967,20 @@ const chatStore = (initial?: Partial<ChatStore>) =>
             console.log(
               `[TTFT] Task ${ttftTaskId} confirmed at ${new Date().toISOString()}, starting TTFT measurement`
             );
+
+            // Start decomposition phase timers for staged status prompts
+            const phaseStore = getCurrentChatStore();
+            phaseStore.setDecompositionPhase(ttftTaskId, 'preparing');
+            clearDecompositionPhaseTimers(ttftTaskId);
+            decompositionPhaseTimers[ttftTaskId] = [
+              setTimeout(() => {
+                phaseStore.setDecompositionPhase(ttftTaskId, 'understanding');
+              }, 2500),
+              setTimeout(() => {
+                phaseStore.setDecompositionPhase(ttftTaskId, 'planning');
+              }, 5000),
+            ];
+
             return;
           }
 
@@ -965,6 +1012,7 @@ const chatStore = (initial?: Partial<ChatStore>) =>
             setStreamingDecomposeText,
             clearStreamingDecomposeText,
             setIsTaskEdit,
+            setDecompositionPhase,
           } = getCurrentChatStore();
 
           currentTaskId = getCurrentTaskId();
@@ -986,6 +1034,15 @@ const chatStore = (initial?: Partial<ChatStore>) =>
                 `%c[TTFT] 🚀 Time to First Token: ${ttft.toFixed(2)}ms - First streaming token received for task ${currentId}`,
                 'color: #4CAF50; font-weight: bold'
               );
+            }
+
+            // Transition to 'decomposing' phase on first decompose_text
+            if (
+              getCurrentChatStore().tasks[currentId]?.decompositionPhase !==
+              'decomposing'
+            ) {
+              clearDecompositionPhaseTimers(currentId);
+              setDecompositionPhase(currentId, 'decomposing');
             }
 
             // Get current buffer or task state
@@ -1023,6 +1080,9 @@ const chatStore = (initial?: Partial<ChatStore>) =>
           if (agentMessages.step === AgentStep.TO_SUB_TASKS) {
             // Clear streaming decompose text when task splitting is done
             clearStreamingDecomposeText(currentTaskId);
+            // Clear decomposition phase - task splitting is done
+            clearDecompositionPhaseTimers(currentTaskId);
+            setDecompositionPhase(currentTaskId, null);
             // Clean up TTFT tracking
             delete ttftTracking[currentTaskId];
 
@@ -1222,6 +1282,8 @@ const chatStore = (initial?: Partial<ChatStore>) =>
             const { content, question } = agentMessages.data;
             setHasWaitComfirm(currentTaskId, true);
             setIsPending(currentTaskId, false);
+            clearDecompositionPhaseTimers(currentTaskId);
+            setDecompositionPhase(currentTaskId, null);
 
             const currentChatStore = getCurrentChatStore();
             //Make sure to add user Message on replay and avoid duplication of first msg
@@ -1415,7 +1477,9 @@ const chatStore = (initial?: Partial<ChatStore>) =>
                   setTaskAssigning(currentTaskId, [...taskAssigning]);
                 }
               }
-              const taskIndex = taskRunning.findIndex((task) => task.id === process_task_id);
+              const taskIndex = taskRunning.findIndex(
+                (task) => task.id === process_task_id
+              );
               if (taskIndex !== -1 && taskRunning[taskIndex].agent) {
                 taskRunning[taskIndex].agent!.status = 'completed';
               }
@@ -1848,6 +1912,8 @@ const chatStore = (initial?: Partial<ChatStore>) =>
           if (agentMessages.step === AgentStep.BUDGET_NOT_ENOUGH) {
             console.log('error', agentMessages.data);
             showCreditsToast();
+            clearDecompositionPhaseTimers(currentTaskId);
+            setDecompositionPhase(currentTaskId, null);
             setStatus(currentTaskId, ChatTaskStatus.PAUSE);
             uploadLog(currentTaskId, type);
             return;
@@ -1869,6 +1935,8 @@ const chatStore = (initial?: Partial<ChatStore>) =>
             );
 
             // Set flag to block input and set status to pause
+            clearDecompositionPhaseTimers(currentTaskId);
+            setDecompositionPhase(currentTaskId, null);
             setIsContextExceeded(currentTaskId, true);
             setStatus(currentTaskId, ChatTaskStatus.PAUSE);
             uploadLog(currentTaskId, type);
@@ -1931,6 +1999,8 @@ const chatStore = (initial?: Partial<ChatStore>) =>
               // Complete the current task with error status
               setStatus(currentTaskId, ChatTaskStatus.FINISHED);
               setIsPending(currentTaskId, false);
+              clearDecompositionPhaseTimers(currentTaskId);
+              setDecompositionPhase(currentTaskId, null);
 
               // Add error message to the current task
               addMessages(currentTaskId, {
@@ -3074,6 +3144,11 @@ const chatStore = (initial?: Partial<ChatStore>) =>
         console.error('Error during timer cleanup in clearTasks:', error);
       }
 
+      // Clean up all decomposition phase timers
+      Object.keys(decompositionPhaseTimers).forEach((taskId) => {
+        clearDecompositionPhaseTimers(taskId);
+      });
+
       // Clean up all active SSE connections
       try {
         Object.keys(activeSSEControllers).forEach((taskId) => {
@@ -3163,6 +3238,21 @@ const chatStore = (initial?: Partial<ChatStore>) =>
             [taskId]: {
               ...state.tasks[taskId],
               streamingDecomposeText: '',
+            },
+          },
+        };
+      });
+    },
+    setDecompositionPhase: (taskId, phase) => {
+      set((state) => {
+        if (!state.tasks[taskId]) return state;
+        return {
+          ...state,
+          tasks: {
+            ...state.tasks,
+            [taskId]: {
+              ...state.tasks[taskId],
+              decompositionPhase: phase,
             },
           },
         };
