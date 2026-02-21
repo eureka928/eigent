@@ -1960,7 +1960,9 @@ const chatStore = (initial?: Partial<ChatStore>) =>
               addMessages(currentTaskId, {
                 id: generateUniqueId(),
                 role: 'agent',
-                content: `❌ **Error**: ${errorMessage}`,
+                content: errorMessage,
+                step: AgentStep.ERROR,
+                error_code: errorCode,
               });
               uploadLog(currentTaskId, type);
 
